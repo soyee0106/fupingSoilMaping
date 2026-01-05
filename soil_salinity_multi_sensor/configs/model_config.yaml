@@ -1,0 +1,113 @@
+# 模型配置文件
+# 定义各模型的超参数，如层数、神经元数、dropout率、学习率等
+
+# 阶段一网络配置（传感器偏差解码器）
+stage1:
+  n_satellite_bands: 4  # 统一格式：G, R, REG, NIR（缺失位置填充0）
+  n_spectral_indices: 26  # 26个指数
+  n_sensors: 2
+  n_mask_bits: 4  # 掩码位数（对应4个波段）
+  hidden_dims: [128, 64, 32]
+  dropout_rate: 0.3
+  use_batch_norm: true
+  use_mask: true  # 是否使用掩码机制处理波段缺失
+
+# 阶段二网络配置（盐分反演网络）
+stage2:
+  n_uav_bands: 4
+  n_spectral_indices: 26  # 26个指数：S1, S1REG, NDSI, NDSIREG, SI1, SI1REG, SI2, SI2REG, SI3, SI3REG, SIT, SITREG, Int1, Int1REG, Int2, Int2REG, NDVI, NDVIREG, SAVI, SAVIREG, BI, BIREG, IFe2O3, IFe2O3REG, DVI, DVIREG
+  hidden_dims: [64, 32, 16]
+  dropout_rate: 0.3
+  use_batch_norm: true
+
+# 完整模型配置（Model C）
+full_model:
+  stage1_config:
+    n_satellite_bands: 4  # 统一格式：G, R, REG, NIR
+    n_spectral_indices: 26  # 26个指数
+    n_sensors: 2
+    n_mask_bits: 4  # 掩码位数
+    hidden_dims: [128, 64, 32]
+    dropout_rate: 0.3
+    use_batch_norm: true
+    use_mask: true  # 使用掩码机制
+  stage2_config:
+    n_uav_bands: 4
+    n_spectral_indices: 26  # 26个指数
+    hidden_dims: [64, 32, 16]
+    dropout_rate: 0.3
+    use_batch_norm: true
+
+# 基线模型A配置（直接从卫星预测盐分）
+baseline_a:
+  n_satellite_bands: 4
+  n_spectral_indices: 6
+  n_sensors: 2
+  hidden_dims: [128, 64, 32, 16]
+  dropout_rate: 0.3
+  use_batch_norm: true
+
+# 基线模型B配置（卫星->无人机波段->盐分，但不学习传感器偏差）
+baseline_b:
+  stage1_config:
+    n_satellite_bands: 4
+    n_spectral_indices: 6
+    n_sensors: 2  # 注意：实际不使用，但保留接口
+    hidden_dims: [128, 64, 32]
+    dropout_rate: 0.3
+    use_batch_norm: true
+  stage2_config:
+    n_uav_bands: 4
+    n_spectral_indices: 26  # 26个指数
+    hidden_dims: [64, 32, 16]
+    dropout_rate: 0.3
+    use_batch_norm: true
+
+# 训练配置
+training:
+  # 阶段一预训练
+  stage1_pretrain:
+    num_epochs: 100
+    learning_rate: 0.001
+    batch_size: 32
+    patience: 10
+  
+  # 阶段二预训练
+  stage2_pretrain:
+    num_epochs: 100
+    learning_rate: 0.001
+    batch_size: 32
+    patience: 10
+  
+  # 联合微调
+  joint_finetune:
+    num_epochs: 50
+    stage1_lr: 0.00001  # 较低的学习率
+    stage2_lr: 0.0001    # 较高的学习率
+    batch_size: 32
+    patience: 10
+  
+  # 基线模型训练
+  baseline_a:
+    num_epochs: 100
+    learning_rate: 0.001
+    batch_size: 32
+    patience: 10
+  
+  baseline_b:
+    num_epochs: 100
+    learning_rate: 0.001
+    batch_size: 32
+    patience: 10
+
+# 设备配置
+device: "cuda"  # "cuda" or "cpu"
+
+# 模型保存路径
+model_save_paths:
+  stage1: "outputs/models/stage1"
+  stage2: "outputs/models/stage2"
+  full_model: "outputs/models/full_model"
+  baseline_a: "outputs/models/baseline_a"
+  baseline_b: "outputs/models/baseline_b"
+

@@ -1,0 +1,139 @@
+# 数据配置文件
+# 定义数据路径、波段名称、样本划分比例、传感器标签等
+
+# 数据路径
+data_paths:
+  samples_shapefile: "D:\\富平星机光谱融合反演\\数据\\samples138_.shp"  
+  # 样点Shapefile路径
+  s2_raster: "D:\\富平星机光谱融合反演\\数据\\Fuping_Sentinel2_20240830.tif"        # Sentinel-2影像路径
+  l8_raster: "D:\\富平星机光谱融合反演\\数据\\Fuping_Landsat8_20240830.tif"         # Landsat-8影像路径
+  uav_raster: "D:\\富平星机光谱融合反演\\数据\\multi_G_R_REG_NIR.tif"             
+  # 无人机影像路径
+  
+# 输出路径
+output_paths:
+  preprocessed_data: "outputs/preprocessed_data.csv"
+  train_data: "outputs/train_data.csv"
+  val_data: "outputs/val_data.csv"
+  test_data: "outputs/test_data.csv"
+
+# 波段配置
+bands:
+  satellite:
+    s2:
+      # Sentinel-2波段映射：根据波段索引或描述识别
+      # 如果影像有波段描述，会根据描述匹配；否则使用索引
+      band_mapping:
+        G:  # 绿光波段（B3）
+          indices: [3]  # 波段索引（从1开始），B3对应索引3
+          names: ["B3"]  # 可能的波段名称
+          center_wavelength: 560  # 中心波长（nm），
+          bandwidth: 30  # 带宽（nm），范围545-575，  
+        R:  # 红光波段（B4）
+          indices: [4]  # B4对应索引4
+          names: ["B4"]
+          center_wavelength: 665  # 中心波长（nm），
+          bandwidth: 30  # 带宽（nm），范围650-680，
+        REG:  # 红边波段（B5）
+          indices: [5]  # B5对应索引5
+          names: ["B5"]
+          center_wavelength: 705  # 中心波长（nm），
+          bandwidth: 20  # 带宽（nm），范围695-715，
+        NIR:  # 近红外波段（B8）
+          indices: [8]  # B8对应索引8
+          names: ["B8"]
+          center_wavelength: 842  # 中心波长（nm），
+          bandwidth: 115  # 带宽（nm），范围785-900，
+    
+    l8:
+      # Landsat-8波段映射
+      band_mapping:
+        G:  # 绿光波段（B3）
+          indices: [3]  # B3对应索引3
+          names: ["SR_B3"]
+          center_wavelength: 560  # 中心波长（nm），
+          bandwidth: 60  # 带宽（nm），范围530-590，
+        R:  # 红光波段（B4）
+          indices: [4]  # B4对应索引4
+          names: ["SR_B4"]
+          center_wavelength: 655  # 中心波长（nm），
+          bandwidth: 30  # 带宽（nm），范围640-670，
+        REG:  # 红边波段（L8没有）
+          indices: []  # L8没有REG波段，传感器未配置红边波段
+          names: []
+          center_wavelength: null  # 中心波长（nm），L8没有此波段
+          bandwidth: null  # 带宽（nm），L8没有此波段
+        NIR:  # 近红外波段（B5）
+          indices: [5]  # B5对应索引5
+          names: ["SR_B5"]
+          center_wavelength: 865  # 中心波长（nm），
+          bandwidth: 30  # 带宽（nm），范围850-880，
+  
+  uav:
+    - name: "band1"
+      center_wavelength: 560
+      bandwidth: 32
+    - name: "band2"
+      center_wavelength: 650
+      bandwidth: 32
+    - name: "band3"
+      center_wavelength: 730
+      bandwidth: 32
+    - name: "band4"
+      center_wavelength: 860
+      bandwidth: 52
+
+# 光谱指数配置（UAV数据的26个指数，按照S2_indices_calculation.py的逻辑）
+# 如果为None或空列表，则计算所有26个指数
+spectral_indices:
+  - "S1"
+  - "S1REG"
+  - "NDSI"
+  - "NDSIREG"
+  - "SI1"
+  - "SI1REG"
+  - "SI2"
+  - "SI2REG"
+  - "SI3"
+  - "SI3REG"
+  - "SIT"
+  - "SITREG"
+  - "Int1"
+  - "Int1REG"
+  - "Int2"
+  - "Int2REG"
+  - "NDVI"
+  - "NDVIREG"
+  - "SAVI"
+  - "SAVIREG"
+  - "BI"
+  - "BIREG"
+  - "IFe2O3"
+  - "IFe2O3REG"
+  - "DVI"
+  - "DVIREG"
+
+# 数据列名
+column_names:
+  salinity: "全盐量"  # 盐分值列名
+  sample_id: "抽样编"  # 样点ID列名（可选）
+
+# 数据划分
+data_split:
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  random_state: 42
+
+# 传感器标签
+sensor_labels:
+  S2: 0
+  L8: 1
+
+# 数据预处理选项
+preprocessing:
+  normalize: true
+  normalization_method: "standard"  # "standard" or "minmax"
+  remove_outliers: false
+  outlier_threshold: 3.0  # 标准差倍数
+
