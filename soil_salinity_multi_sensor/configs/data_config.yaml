@@ -133,7 +133,21 @@ sensor_labels:
 # 数据预处理选项
 preprocessing:
   normalize: true
-  normalization_method: "standard"  # "standard" or "minmax"
+  normalization_method: "standard"  # "standard" (Z-score) or "minmax"
   remove_outliers: false
   outlier_threshold: 3.0  # 标准差倍数
+  batch_size: 32  # 训练时的批次大小
+  
+  # 密集数据生成选项（用于学习密集映射关系）
+  dense_mapping:
+    enabled: true  # 是否使用密集映射模式（true=像元对像元，false=样点提取）
+    align_to: "satellite"  # 对齐到哪个影像网格："satellite" 或 "uav"
+    target_resolution: null  # 目标分辨率（度或米），null则使用卫星分辨率
+    satellite_nodata: null  # 卫星影像nodata值，null则自动检测
+    uav_nodata: 65535  # 无人机影像nodata值
+    s2_nodata: 0  # Sentinel-2的nodata值
+    l8_nodata: null  # Landsat-8的nodata值，null则自动检测
+    # 波段索引（从1开始），null则提取所有波段
+    satellite_band_indices: null  # 例如：[3, 4, 5, 8] for S2的G, R, REG, NIR
+    uav_band_indices: null  # 例如：[1, 2, 3, 4] for UAV的G, R, REG, NIR
 

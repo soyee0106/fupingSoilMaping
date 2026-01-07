@@ -24,6 +24,7 @@ class StandardScaler:
         """初始化标准化器。"""
         self.mean_ = None
         self.std_ = None
+        self.scale_ = None  # 与sklearn兼容，scale_ = 1 / std_
         self.fitted = False
     
     def fit(self, X: np.ndarray):
@@ -37,8 +38,10 @@ class StandardScaler:
         self.std_ = np.std(X, axis=0, keepdims=True)
         # 避免除零
         self.std_ = np.where(self.std_ == 0, 1.0, self.std_)
+        # scale_ = 1 / std_ (与sklearn兼容)
+        self.scale_ = 1.0 / self.std_
         self.fitted = True
-        logger.info(f"StandardScaler fitted: mean shape={self.mean_.shape}, std shape={self.std_.shape}")
+        logger.info(f"StandardScaler fitted: mean shape={self.mean_.shape}, std shape={self.std_.shape}, scale shape={self.scale_.shape}")
     
     def transform(self, X: np.ndarray) -> np.ndarray:
         """
@@ -97,6 +100,7 @@ class StandardScaler:
             pickle.dump({
                 'mean_': self.mean_,
                 'std_': self.std_,
+                'scale_': self.scale_,
                 'fitted': self.fitted
             }, f)
         
@@ -116,6 +120,7 @@ class StandardScaler:
         
         self.mean_ = params['mean_']
         self.std_ = params['std_']
+        self.scale_ = params.get('scale_', 1.0 / params['std_'])  # 兼容旧版本
         self.fitted = params['fitted']
         
         logger.info(f"StandardScaler loaded from {filepath}")

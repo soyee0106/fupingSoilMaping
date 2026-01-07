@@ -3,6 +3,7 @@
 
 使用"卫星特征-真实无人机波段"数据对训练阶段一网络（传感器偏差解码器）。
 损失函数：MSE（均方误差）
+监控指标：R²（决定系数）
 """
 
 import torch
@@ -13,8 +14,10 @@ from pathlib import Path
 from typing import Dict, Optional
 import logging
 from tqdm import tqdm
+import numpy as np
 
 from models.stage1_decoder import SensorBiasDecoder
+from evaluation.metrics import calculate_r2
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -69,7 +72,10 @@ def train_stage1_decoder(
     # 训练历史
     train_losses = []
     val_losses = []
+    train_r2_scores = []
+    val_r2_scores = []
     best_val_loss = float('inf')
+    best_val_r2 = -float('inf')
     best_epoch = 0
     patience_counter = 0
     
@@ -85,21 +91,24 @@ def train_stage1_decoder(
         train_loss = 0.0
         train_batches = 0
         
+        # 用于计算R²的累积值
+        all_preds = []
+        all_targets = []
+        
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} [Train]")
         for batch in pbar:
-            # 解包批次数据
-            satellite_bands = batch[0].to(device)
-            spectral_indices = batch[1].to(device)
-            sensor_onehot = batch[2].to(device)
-            uav_bands_true = batch[3].to(device)
-            # 掩码向量（如果提供）
-            band_mask = batch[4].to(device) if len(batch) > 4 else None
+            # 解包批次数据（字典格式）
+            satellite_bands = batch['satellite_bands'].to(device)
+            spectral_indices = batch['spectral_indices'].to(device)
+            sensor_onehot = batch['sensor_onehot'].to(device)
+            band_mask = batch['band_mask'].to(device)
+            uav_bands_true = batch['uav_bands'].to(device)
             
             # 前向传播
             optimizer.zero_grad()
             uav_bands_pred = model(satellite_bands, spectral_indices, sensor_onehot, band_mask)
             
-            # 计算损失（可以考虑使用掩码加权损失，只对有效波段计算损失）
+            # 计算损失
             loss = criterion(uav_bands_pred, uav_bands_true)
             
             # 反向传播
@@ -108,60 +117,94 @@ def train_stage1_decoder(
             
             train_loss += loss.item()
             train_batches += 1
+            
+            # 累积预测值和真实值（用于计算R²）
+            all_preds.append(uav_bands_pred.detach().cpu().numpy())
+            all_targets.append(uav_bands_true.detach().cpu().numpy())
+            
             pbar.set_postfix({'loss': f'{loss.item():.6f}'})
         
         avg_train_loss = train_loss / train_batches
         train_losses.append(avg_train_loss)
+        
+        # 计算训练集R²
+        if all_preds:
+            train_preds = np.concatenate(all_preds, axis=0)
+            train_targets = np.concatenate(all_targets, axis=0)
+            train_r2 = calculate_r2(train_targets.flatten(), train_preds.flatten())
+            train_r2_scores.append(train_r2)
+        else:
+            train_r2 = 0.0
+            train_r2_scores.append(train_r2)
         
         # 验证阶段
         if val_loader is not None:
             model.eval()
             val_loss = 0.0
             val_batches = 0
+            val_preds = []
+            val_targets = []
             
             with torch.no_grad():
                 for batch in val_loader:
-                    satellite_bands = batch[0].to(device)
-                    spectral_indices = batch[1].to(device)
-                    sensor_onehot = batch[2].to(device)
-                    uav_bands_true = batch[3].to(device)
-                    # 掩码向量（如果提供）
-                    band_mask = batch[4].to(device) if len(batch) > 4 else None
+                    satellite_bands = batch['satellite_bands'].to(device)
+                    spectral_indices = batch['spectral_indices'].to(device)
+                    sensor_onehot = batch['sensor_onehot'].to(device)
+                    band_mask = batch['band_mask'].to(device)
+                    uav_bands_true = batch['uav_bands'].to(device)
                     
                     uav_bands_pred = model(satellite_bands, spectral_indices, sensor_onehot, band_mask)
                     loss = criterion(uav_bands_pred, uav_bands_true)
                     
                     val_loss += loss.item()
                     val_batches += 1
+                    
+                    # 累积验证集预测值和真实值
+                    val_preds.append(uav_bands_pred.cpu().numpy())
+                    val_targets.append(uav_bands_true.cpu().numpy())
             
             avg_val_loss = val_loss / val_batches
             val_losses.append(avg_val_loss)
             
+            # 计算验证集R²
+            if val_preds:
+                val_preds_flat = np.concatenate(val_preds, axis=0)
+                val_targets_flat = np.concatenate(val_targets, axis=0)
+                val_r2 = calculate_r2(val_targets_flat.flatten(), val_preds_flat.flatten())
+                val_r2_scores.append(val_r2)
+            else:
+                val_r2 = 0.0
+                val_r2_scores.append(val_r2)
+            
             logger.info(
                 f"Epoch {epoch+1}/{num_epochs} - "
-                f"Train Loss: {avg_train_loss:.6f}, "
-                f"Val Loss: {avg_val_loss:.6f}"
+                f"Train Loss: {avg_train_loss:.6f}, Train R²: {train_r2:.4f} | "
+                f"Val Loss: {avg_val_loss:.6f}, Val R²: {val_r2:.4f}"
             )
             
-            # 保存最佳模型
+            # 保存最佳模型（基于验证损失）
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
+                best_val_r2 = val_r2
                 best_epoch = epoch + 1
                 patience_counter = 0
                 
                 if save_best and save_dir is not None:
                     torch.save(
                         model.state_dict(),
-                        save_dir / 'stage1_best_model.pth'
+                        save_dir / 'best_model.pth'
                     )
-                    logger.info(f"  -> Best model saved (Val Loss: {best_val_loss:.6f})")
+                    logger.info(f"  -> Best model saved (Val Loss: {best_val_loss:.6f}, Val R²: {best_val_r2:.4f})")
             else:
                 patience_counter += 1
                 if patience_counter >= patience:
                     logger.info(f"Early stopping at epoch {epoch+1}")
                     break
         else:
-            logger.info(f"Epoch {epoch+1}/{num_epochs} - Train Loss: {avg_train_loss:.6f}")
+            logger.info(
+                f"Epoch {epoch+1}/{num_epochs} - "
+                f"Train Loss: {avg_train_loss:.6f}, Train R²: {train_r2:.4f}"
+            )
         
         # 保存每个epoch的模型（可选）
         if save_dir is not None and (epoch + 1) % 10 == 0:
@@ -181,12 +224,17 @@ def train_stage1_decoder(
     logger.info("=" * 60)
     logger.info("Training completed!")
     logger.info(f"Best validation loss: {best_val_loss:.6f} (epoch {best_epoch})")
+    if val_r2_scores:
+        logger.info(f"Best validation R²: {best_val_r2:.4f} (epoch {best_epoch})")
     logger.info("=" * 60)
     
     return {
         'train_losses': train_losses,
         'val_losses': val_losses,
+        'train_r2_scores': train_r2_scores,
+        'val_r2_scores': val_r2_scores,
         'best_val_loss': best_val_loss,
+        'best_val_r2': best_val_r2 if val_r2_scores else None,
         'best_epoch': best_epoch
     }
 
