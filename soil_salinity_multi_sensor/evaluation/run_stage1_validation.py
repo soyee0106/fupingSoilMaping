@@ -93,6 +93,8 @@ def run_validation_experiments(
     # 创建输出目录
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"输出目录: {output_dir.absolute()}")
+    logger.info(f"输出目录存在: {output_dir.exists()}")
     
     # 实验1：基础映射精度
     logger.info("\n" + "=" * 80)
@@ -148,7 +150,19 @@ def run_validation_experiments(
         points_shapefile = project_root / points_shapefile
     
     if points_shapefile.exists() and s2_aligned_path.exists() and l8_aligned_path.exists() and uav_aligned_path.exists():
-        band_mapping_config = data_config.get('band_mapping', {})
+        # 获取波段映射配置（支持两种配置结构）
+        if 'band_mapping' in data_config:
+            band_mapping_config = data_config.get('band_mapping', {})
+        elif 'bands' in data_config and 'satellite' in data_config['bands']:
+            # 从 bands.satellite 结构获取
+            band_mapping_config = {
+                's2': data_config['bands']['satellite'].get('s2', {}),
+                'l8': data_config['bands']['satellite'].get('l8', {})
+            }
+        else:
+            band_mapping_config = {}
+        
+        logger.info(f"波段映射配置结构: {list(band_mapping_config.keys())}")
         
         experiment3_spectral_curves_visualization(
             model=model,
@@ -209,36 +223,46 @@ def run_validation_experiments(
     }
     
     results_json_path = output_dir / 'validation_results.json'
-    with open(results_json_path, 'w', encoding='utf-8') as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
-    
-    logger.info(f"\n结果已保存到: {results_json_path}")
+    try:
+        with open(results_json_path, 'w', encoding='utf-8') as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+        logger.info(f"\n结果已保存到: {results_json_path.absolute()}")
+    except Exception as e:
+        logger.error(f"保存JSON结果失败: {e}")
+        logger.error(f"输出目录: {output_dir.absolute()}")
+        logger.error(f"输出目录存在: {output_dir.exists()}")
+        raise
     
     # 生成文本报告
     report_path = output_dir / 'validation_report.txt'
-    with open(report_path, 'w', encoding='utf-8') as f:
-        f.write("=" * 80 + "\n")
-        f.write("Stage 1 验证实验报告\n")
-        f.write("=" * 80 + "\n\n")
+    try:
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write("=" * 80 + "\n")
+            f.write("Stage 1 验证实验报告\n")
+            f.write("=" * 80 + "\n\n")
+            
+            f.write("实验1：基础映射精度评估\n")
+            f.write("-" * 80 + "\n")
+            for sensor, metrics in exp1_results.items():
+                f.write(f"\n{sensor}:\n")
+                f.write(f"  总体R²: {metrics['R2_overall']:.4f}\n")
+                f.write(f"  总体RMSE: {metrics['RMSE_overall']:.4f}\n")
+                f.write(f"  各波段R²: {metrics['R2_per_band']}\n")
+                f.write(f"  各波段RMSE: {metrics['RMSE_per_band']}\n")
+            
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("实验2：跨传感器一致性评估\n")
+            f.write("-" * 80 + "\n")
+            f.write(f"平均欧氏距离: {exp2_results['mean_euclidean_distance']:.4f}\n")
+            f.write(f"标准差: {exp2_results['std_euclidean_distance']:.4f}\n")
+            f.write(f"中位数: {exp2_results['median_euclidean_distance']:.4f}\n")
+            f.write(f"各波段平均绝对差异: {exp2_results['mean_absolute_diff_per_band']}\n")
         
-        f.write("实验1：基础映射精度评估\n")
-        f.write("-" * 80 + "\n")
-        for sensor, metrics in exp1_results.items():
-            f.write(f"\n{sensor}:\n")
-            f.write(f"  总体R²: {metrics['R2_overall']:.4f}\n")
-            f.write(f"  总体RMSE: {metrics['RMSE_overall']:.4f}\n")
-            f.write(f"  各波段R²: {metrics['R2_per_band']}\n")
-            f.write(f"  各波段RMSE: {metrics['RMSE_per_band']}\n")
-        
-        f.write("\n" + "=" * 80 + "\n")
-        f.write("实验2：跨传感器一致性评估\n")
-        f.write("-" * 80 + "\n")
-        f.write(f"平均欧氏距离: {exp2_results['mean_euclidean_distance']:.4f}\n")
-        f.write(f"标准差: {exp2_results['std_euclidean_distance']:.4f}\n")
-        f.write(f"中位数: {exp2_results['median_euclidean_distance']:.4f}\n")
-        f.write(f"各波段平均绝对差异: {exp2_results['mean_absolute_diff_per_band']}\n")
-    
-    logger.info(f"报告已保存到: {report_path}")
+        logger.info(f"报告已保存到: {report_path.absolute()}")
+    except Exception as e:
+        logger.error(f"保存文本报告失败: {e}")
+        logger.error(f"输出目录: {output_dir.absolute()}")
+        raise
     
     # 打印摘要
     logger.info("\n" + "=" * 80)

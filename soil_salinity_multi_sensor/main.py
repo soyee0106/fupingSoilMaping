@@ -487,32 +487,52 @@ def train_models(data_config: Dict, model_config: Dict, stage: str = 'stage1'):
         logger.info(f"Best validation loss: {history.get('best_val_loss', 'N/A')}")
         
     elif stage == 'stage2':
-        # 训练阶段二：盐分反演网络
-        logger.info("Training Stage 2: Salinity Inverter")
-        
-        stage2_config = model_config['stage2']
-        stage2_model = SalinityInverter(**stage2_config)
-        stage2_model = stage2_model.to(device)
-        
-        training_config = model_config.get('training', {})
-        stage2_training = training_config.get('stage2', {})
-        
-        from training.pretrain_stage2 import train_stage2_inverter
-        
-        history = train_stage2_inverter(
-            model=stage2_model,
-            train_loader=train_loader,
-            val_loader=val_loader,
-            num_epochs=stage2_training.get('num_epochs', 100),
-            learning_rate=stage2_training.get('learning_rate', 1e-3),
-            device=device,
-            save_dir=output_dir / 'stage2',
-            save_best=True,
-            patience=stage2_training.get('patience', 10)
+        # ========================================================================
+        # 【已封存】训练阶段二：盐分反演网络（深度学习模型）
+        # 
+        # 注意：此功能已封存，不再作为主要实验流程。
+        # 主要实验流程请使用：python main.py --mode run_stage2_experiments
+        # 该方法使用传统机器学习方法（PLSR、SVR等）进行盐分反演对比实验。
+        # ========================================================================
+        logger.warning("=" * 60)
+        logger.warning("⚠️  警告：Stage 2深度学习训练已封存")
+        logger.warning("=" * 60)
+        logger.warning("此功能已不再作为主要实验流程。")
+        logger.warning("主要实验流程请使用：")
+        logger.warning("  python main.py --mode run_stage2_experiments")
+        logger.warning("该方法使用传统机器学习方法进行5组对比实验。")
+        logger.warning("=" * 60)
+        logger.warning("如果确实需要训练深度学习模型，请取消注释下方代码。")
+        logger.warning("=" * 60)
+        raise NotImplementedError(
+            "Stage 2深度学习训练已封存。"
+            "请使用 'python main.py --mode run_stage2_experiments' 进行主要实验。"
         )
         
-        logger.info(f"Stage 2 training completed!")
-        logger.info(f"Best validation loss: {history.get('best_val_loss', 'N/A')}")
+        # # 以下代码已封存，如需使用请取消注释
+        # stage2_config = model_config['stage2']
+        # stage2_model = SalinityInverter(**stage2_config)
+        # stage2_model = stage2_model.to(device)
+        # 
+        # training_config = model_config.get('training', {})
+        # stage2_training = training_config.get('stage2', {})
+        # 
+        # from training.pretrain_stage2 import train_stage2_inverter
+        # 
+        # history = train_stage2_inverter(
+        #     model=stage2_model,
+        #     train_loader=train_loader,
+        #     val_loader=val_loader,
+        #     num_epochs=stage2_training.get('num_epochs', 100),
+        #     learning_rate=stage2_training.get('learning_rate', 1e-3),
+        #     device=device,
+        #     save_dir=output_dir / 'stage2',
+        #     save_best=True,
+        #     patience=stage2_training.get('patience', 10)
+        # )
+        # 
+        # logger.info(f"Stage 2 training completed!")
+        # logger.info(f"Best validation loss: {history.get('best_val_loss', 'N/A')}")
         
     elif stage == 'full':
         # 联合微调完整模型
@@ -688,8 +708,8 @@ def main():
         '--mode',
         type=str,
         required=True,
-        choices=['preprocess', 'train', 'evaluate', 'apply', 'align', 'infer_stage1', 'validate_stage1'],
-        help='运行模式：preprocess（预处理）、train（训练）、evaluate（评估）、apply（应用）、align（影像对齐）、infer_stage1（Stage1推理）、validate_stage1（Stage1验证）'
+        choices=['preprocess', 'train', 'evaluate', 'apply', 'align', 'infer_stage1', 'validate_stage1', 'run_stage2_experiments'],
+        help='运行模式：preprocess（预处理）、train（训练）、evaluate（评估）、apply（应用）、align（影像对齐）、infer_stage1（Stage1推理）、validate_stage1（Stage1验证）、run_stage2_experiments（Stage2对比实验）'
     )
     
     parser.add_argument(
@@ -725,7 +745,7 @@ def main():
         type=str,
         default='stage1',
         choices=['stage1', 'stage2', 'full', 'baseline_a', 'baseline_b'],
-        help='训练阶段：stage1（阶段一）、stage2（阶段二）、full（联合微调）、baseline_a、baseline_b'
+        help='训练阶段：stage1（阶段一）、stage2（阶段二，已封存）、full（联合微调）、baseline_a、baseline_b'
     )
     
     args = parser.parse_args()
@@ -785,28 +805,15 @@ def main():
         )
     
     elif args.mode == 'validate_stage1':
-        # Stage 1验证模式：运行验证实验
         from evaluation.run_stage1_validation import run_validation_experiments
-        
-        model_path = Path('outputs/models/stage1/best_model.pth')
-        if not model_path.exists():
-            logger.error(f"模型文件不存在: {model_path}")
-            logger.error("请先训练Stage 1模型")
-            return
-        
-        val_data_path = Path(data_config['output_paths']['val_data'])
-        if not val_data_path.exists():
-            logger.error(f"验证数据文件不存在: {val_data_path}")
-            logger.error("请先运行数据预处理")
-            return
-        
         run_validation_experiments(
-            model_path=model_path,
-            model_config_path=Path(args.model_config),
-            data_config_path=Path(args.data_config),
-            val_data_path=val_data_path,
-            output_dir=Path('outputs/stage1_validation')
+            data_config_path=args.data_config,
+            model_config_path=args.model_config
         )
+    
+    elif args.mode == 'run_stage2_experiments':
+        from evaluation.stage2_experiments import main as run_stage2_experiments
+        run_stage2_experiments()
 
 
 if __name__ == '__main__':

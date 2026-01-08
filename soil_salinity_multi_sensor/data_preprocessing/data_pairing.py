@@ -886,6 +886,9 @@ class DataPairer:
                 # 确保尺寸匹配
                 if s2_band.shape != (uav_height, uav_width):
                     s2_band = s2_band[:uav_height, :uav_width]
+                # 关键修复：转换为float32，避免uint16类型导致后续标准化问题
+                if s2_band.dtype != np.float32:
+                    s2_band = s2_band.astype(np.float32)
                 s2_bands_aligned.append(s2_band)
         
         s2_height_aligned, s2_width_aligned = s2_bands_aligned[0].shape
@@ -1330,38 +1333,74 @@ class DataPairer:
             # 辅助函数：标准化单个波段
             def normalize_band(band_array, scaler, band_idx):
                 """标准化单个波段"""
-                band_flat = band_array.flatten()
+                # 关键修复：先将数组转换为float32，避免uint16类型导致的值截断
+                band_flat = band_array.flatten().astype(np.float32)
                 valid_mask = ~np.isnan(band_flat)
-                band_normalized = band_flat.copy()
+                # 创建float32类型的输出数组
+                band_normalized = np.full_like(band_flat, np.nan, dtype=np.float32)
                 
                 if valid_mask.any():
                     if hasattr(scaler, 'mean_'):
                         # StandardScaler
-                        if band_idx < scaler.mean_.shape[1]:
-                            band_mean = scaler.mean_[0, band_idx]
-                            band_std = scaler.std_[0, band_idx]
+                        # 检查mean_的形状：(1, n_features) 或 (n_features,)
+                        if scaler.mean_.ndim == 2:
+                            if band_idx < scaler.mean_.shape[1]:
+                                band_mean = float(scaler.mean_[0, band_idx])
+                                band_std = float(scaler.std_[0, band_idx])
+                            else:
+                                logger.warning(f"波段索引 {band_idx} 超出范围，使用最后一个波段参数")
+                                band_mean = float(scaler.mean_[0, -1])
+                                band_std = float(scaler.std_[0, -1])
                         else:
-                            band_mean = scaler.mean_[0, -1]
-                            band_std = scaler.std_[0, -1]
+                            # mean_是1D数组
+                            if band_idx < len(scaler.mean_):
+                                band_mean = float(scaler.mean_[band_idx])
+                                band_std = float(scaler.std_[band_idx])
+                            else:
+                                logger.warning(f"波段索引 {band_idx} 超出范围，使用最后一个波段参数")
+                                band_mean = float(scaler.mean_[-1])
+                                band_std = float(scaler.std_[-1])
+                        
+                        # 避免除零
+                        if band_std == 0:
+                            band_std = 1.0
+                        
+                        # 标准化计算（结果自动为float32）
                         band_normalized[valid_mask] = (band_flat[valid_mask] - band_mean) / band_std
                     else:
                         # MinMaxScaler
-                        if band_idx < scaler.min_.shape[1]:
-                            band_min = scaler.min_[0, band_idx]
-                            band_scale = scaler.scale_[0, band_idx]
+                        if scaler.min_.ndim == 2:
+                            if band_idx < scaler.min_.shape[1]:
+                                band_min = float(scaler.min_[0, band_idx])
+                                band_scale = float(scaler.scale_[0, band_idx])
+                            else:
+                                band_min = float(scaler.min_[0, -1])
+                                band_scale = float(scaler.scale_[0, -1])
                         else:
-                            band_min = scaler.min_[0, -1]
-                            band_scale = scaler.scale_[0, -1]
+                            if band_idx < len(scaler.min_):
+                                band_min = float(scaler.min_[band_idx])
+                                band_scale = float(scaler.scale_[band_idx])
+                            else:
+                                band_min = float(scaler.min_[-1])
+                                band_scale = float(scaler.scale_[-1])
                         band_normalized[valid_mask] = (band_flat[valid_mask] - band_min) * band_scale + scaler.feature_range[0]
                 
-                return band_normalized.reshape(band_array.shape)
+                # 确保返回float32类型
+                result = band_normalized.reshape(band_array.shape).astype(np.float32)
+                return result
             
             # 标准化S2对齐影像
             if output_normalized_s2_tif:
                 logger.info(f"标准化并保存S2影像: {output_normalized_s2_tif}")
                 s2_bands_normalized = []
                 for i, band in enumerate(s2_bands_common):
-                    s2_bands_normalized.append(normalize_band(band, scaler_s2, i))
+                    # 检查原始数据类型
+                    logger.info(f"  S2波段{i+1}: 原始数据类型={band.dtype}, 原始范围=[{band.min():.2f}, {band.max():.2f}]")
+                    normalized_band = normalize_band(band, scaler_s2, i)
+                    s2_bands_normalized.append(normalized_band)
+                    # 添加调试信息
+                    logger.info(f"  S2波段{i+1}: 标准化后数据类型={normalized_band.dtype}, "
+                              f"标准化后范围=[{normalized_band.min():.4f}, {normalized_band.max():.4f}]")
                 
                 save_aligned_raster(
                     aligned_bands=s2_bands_normalized,

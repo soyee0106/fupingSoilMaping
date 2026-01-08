@@ -132,8 +132,23 @@ def experiment3_spectral_curves_visualization(
     
     # 获取波段索引
     pairer = DataPairer()
-    s2_config = band_mapping_config.get('s2', {}).get('band_mapping', {})
-    l8_config = band_mapping_config.get('l8', {}).get('band_mapping', {})
+    # 处理不同的配置结构
+    if 's2' in band_mapping_config:
+        s2_config = band_mapping_config.get('s2', {}).get('band_mapping', {})
+    elif 'satellite' in band_mapping_config and 's2' in band_mapping_config.get('satellite', {}):
+        s2_config = band_mapping_config['satellite']['s2'].get('band_mapping', {})
+    else:
+        s2_config = {}
+    
+    if 'l8' in band_mapping_config:
+        l8_config = band_mapping_config.get('l8', {}).get('band_mapping', {})
+    elif 'satellite' in band_mapping_config and 'l8' in band_mapping_config.get('satellite', {}):
+        l8_config = band_mapping_config['satellite']['l8'].get('band_mapping', {})
+    else:
+        l8_config = {}
+    
+    logger.info(f"S2配置: {s2_config}")
+    logger.info(f"L8配置: {l8_config}")
     
     # S2波段索引（G, R, REG, NIR）
     s2_band_indices = []
@@ -180,35 +195,76 @@ def experiment3_spectral_curves_visualization(
     logger.info(f"UAV光谱值范围: [{uav_spectra_normalized.min():.4f}, {uav_spectra_normalized.max():.4f}]")
     
     # 提取S2光谱（标准化后的值）
+    # 注意：标准化后的影像只包含4个波段（G, R, REG, NIR），按顺序对应波段索引 1, 2, 3, 4
+    # 因此直接使用波段索引 1, 2, 3, 4，而不是原始影像的波段索引
     logger.info("提取S2光谱（标准化后的值）...")
+    logger.info(f"S2原始波段索引配置: {s2_band_indices}")
+    logger.info(f"S2影像路径: {s2_raster_path}")
+    
+    # 检查影像波段数
+    with rasterio.open(s2_raster_path) as src:
+        num_bands = src.count
+        logger.info(f"S2影像波段数: {num_bands}")
+    
     s2_spectra_normalized = []
-    for i, band_idx in enumerate(s2_band_indices):
-        if band_idx:
+    # 标准化后的影像波段顺序：1=G, 2=R, 3=REG, 4=NIR
+    normalized_band_order = [1, 2, 3, 4]  # 标准化后影像的波段索引
+    band_names = ['G', 'R', 'REG', 'NIR']
+    
+    for i, (band_name, normalized_idx) in enumerate(zip(band_names, normalized_band_order)):
+        if normalized_idx <= num_bands:
             spectra = extract_spectrum_at_points(
-                s2_raster_path, points_gdf, [band_idx], None
+                s2_raster_path, points_gdf, [normalized_idx], None
             )
-            s2_spectra_normalized.append(spectra[:, 0])
+            band_values = spectra[:, 0]
+            s2_spectra_normalized.append(band_values)
+            logger.info(f"  S2波段 {band_name} (标准化影像索引{normalized_idx}): 有效值 {np.sum(~np.isnan(band_values))}/{len(band_values)}, "
+                       f"范围 [{np.nanmin(band_values):.4f}, {np.nanmax(band_values):.4f}]")
         else:
             s2_spectra_normalized.append(np.full(len(points_gdf), np.nan))
+            logger.info(f"  S2波段 {band_name}: 波段索引超出范围（填充NaN）")
     s2_spectra_normalized = np.column_stack(s2_spectra_normalized)
     logger.info(f"S2光谱形状: {s2_spectra_normalized.shape}")
-    logger.info(f"S2光谱值范围: [{s2_spectra_normalized.min():.4f}, {s2_spectra_normalized.max():.4f}]")
+    logger.info(f"S2光谱值范围: [{np.nanmin(s2_spectra_normalized):.4f}, {np.nanmax(s2_spectra_normalized):.4f}]")
+    logger.info(f"S2光谱有效值数量: {np.sum(~np.isnan(s2_spectra_normalized))}/{s2_spectra_normalized.size}")
     
     # 提取L8光谱（标准化后的值）
+    # 注意：标准化后的影像只包含4个波段（G, R, REG=0, NIR），按顺序对应波段索引 1, 2, 3, 4
+    # L8没有REG波段，所以索引3位置应该是0或NaN
     logger.info("提取L8光谱（标准化后的值）...")
+    logger.info(f"L8原始波段索引配置: {l8_band_indices}")
+    logger.info(f"L8影像路径: {l8_raster_path}")
+    
+    # 检查影像波段数
+    with rasterio.open(l8_raster_path) as src:
+        num_bands = src.count
+        logger.info(f"L8影像波段数: {num_bands}")
+    
     l8_spectra_normalized = []
-    for i, band_idx in enumerate(l8_band_indices):
-        if band_idx:
-            spectra = extract_spectrum_at_points(
-                l8_raster_path, points_gdf, [band_idx], None
-            )
-            l8_spectra_normalized.append(spectra[:, 0])
-        else:
-            # REG波段缺失，填充0
+    # 标准化后的影像波段顺序：1=G, 2=R, 3=REG(对L8为0), 4=NIR
+    normalized_band_order = [1, 2, 3, 4]  # 标准化后影像的波段索引
+    band_names = ['G', 'R', 'REG', 'NIR']
+    
+    for i, (band_name, normalized_idx) in enumerate(zip(band_names, normalized_band_order)):
+        if band_name == 'REG':
+            # L8没有REG波段，填充0（标准化后应该是0）
             l8_spectra_normalized.append(np.full(len(points_gdf), 0.0))
+            logger.info(f"  L8波段 {band_name}: L8无此波段（填充0）")
+        elif normalized_idx <= num_bands:
+            spectra = extract_spectrum_at_points(
+                l8_raster_path, points_gdf, [normalized_idx], None
+            )
+            band_values = spectra[:, 0]
+            l8_spectra_normalized.append(band_values)
+            logger.info(f"  L8波段 {band_name} (标准化影像索引{normalized_idx}): 有效值 {np.sum(~np.isnan(band_values))}/{len(band_values)}, "
+                       f"范围 [{np.nanmin(band_values):.4f}, {np.nanmax(band_values):.4f}]")
+        else:
+            l8_spectra_normalized.append(np.full(len(points_gdf), np.nan))
+            logger.info(f"  L8波段 {band_name}: 波段索引超出范围（填充NaN）")
     l8_spectra_normalized = np.column_stack(l8_spectra_normalized)
     logger.info(f"L8光谱形状: {l8_spectra_normalized.shape}")
-    logger.info(f"L8光谱值范围: [{l8_spectra_normalized.min():.4f}, {l8_spectra_normalized.max():.4f}]")
+    logger.info(f"L8光谱值范围: [{np.nanmin(l8_spectra_normalized):.4f}, {np.nanmax(l8_spectra_normalized):.4f}]")
+    logger.info(f"L8光谱有效值数量: {np.sum(~np.isnan(l8_spectra_normalized))}/{l8_spectra_normalized.size}")
     
     # 模型预测
     logger.info("模型预测...")
@@ -341,11 +397,30 @@ def experiment3_spectral_curves_visualization(
                 ax = axes[ax_idx]
                 
                 # 绘制5条曲线（所有值都是标准化后的，在同一尺度）
-                ax.plot(band_wavelengths, uav_spectra_for_plot[point_idx], 'o-', label='真实UAV光谱（标准化后）', linewidth=2, markersize=8, color='blue')
-                ax.plot(band_wavelengths, s2_spectra_for_plot[point_idx], 's-', label='原始S2光谱（标准化后）', linewidth=2, markersize=8, alpha=0.7, color='orange')
-                ax.plot(band_wavelengths, l8_spectra_for_plot[point_idx], '^-', label='原始L8光谱（标准化后）', linewidth=2, markersize=8, alpha=0.7, color='green')
-                ax.plot(band_wavelengths, s2_preds_normalized[point_idx], '--', label='S2预测光谱（标准化后）', linewidth=2, alpha=0.8, color='purple')
-                ax.plot(band_wavelengths, l8_preds_normalized[point_idx], '--', label='L8预测光谱（标准化后）', linewidth=2, alpha=0.8, color='gray')
+                # 处理NaN值：只绘制有效值
+                uav_vals = uav_spectra_for_plot[point_idx]
+                s2_vals = s2_spectra_for_plot[point_idx]
+                l8_vals = l8_spectra_for_plot[point_idx]
+                s2_pred_vals = s2_preds_normalized[point_idx]
+                l8_pred_vals = l8_preds_normalized[point_idx]
+                
+                # 创建有效值掩码
+                uav_valid = ~np.isnan(uav_vals)
+                s2_valid = ~np.isnan(s2_vals)
+                l8_valid = ~np.isnan(l8_vals)
+                s2_pred_valid = ~np.isnan(s2_pred_vals)
+                l8_pred_valid = ~np.isnan(l8_pred_vals)
+                
+                if np.any(uav_valid):
+                    ax.plot(np.array(band_wavelengths)[uav_valid], uav_vals[uav_valid], 'o-', label='真实UAV光谱（标准化后）', linewidth=2, markersize=8, color='blue')
+                if np.any(s2_valid):
+                    ax.plot(np.array(band_wavelengths)[s2_valid], s2_vals[s2_valid], 's-', label='原始S2光谱（标准化后）', linewidth=2, markersize=8, alpha=0.7, color='orange')
+                if np.any(l8_valid):
+                    ax.plot(np.array(band_wavelengths)[l8_valid], l8_vals[l8_valid], '^-', label='原始L8光谱（标准化后）', linewidth=2, markersize=8, alpha=0.7, color='green')
+                if np.any(s2_pred_valid):
+                    ax.plot(np.array(band_wavelengths)[s2_pred_valid], s2_pred_vals[s2_pred_valid], '--', label='S2预测光谱（标准化后）', linewidth=2, alpha=0.8, color='purple')
+                if np.any(l8_pred_valid):
+                    ax.plot(np.array(band_wavelengths)[l8_pred_valid], l8_pred_vals[l8_pred_valid], '--', label='L8预测光谱（标准化后）', linewidth=2, alpha=0.8, color='gray')
                 
                 ax.set_xlabel('波长 (nm)', fontsize=12)
                 ax.set_ylabel('标准化后的反射率', fontsize=12)
@@ -361,24 +436,60 @@ def experiment3_spectral_curves_visualization(
     else:
         # 绘制所有点（最多10个）
         n_points = min(len(points_gdf), 10)
-        fig, axes = plt.subplots(2, 5, figsize=(25, 10))
-        axes = axes.flatten()
+        
+        # 动态计算子图布局：根据实际点数调整
+        if n_points <= 5:
+            n_rows, n_cols = 1, n_points
+            figsize = (5 * n_points, 5)
+        else:
+            n_rows, n_cols = 2, 5
+            figsize = (25, 10)
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+        if n_points == 1:
+            axes = [axes]
+        else:
+            axes = axes.flatten() if n_rows > 1 else axes
         
         for i in range(n_points):
             ax = axes[i]
             
             # 绘制5条曲线（所有值都是标准化后的，在同一尺度）
-            ax.plot(band_wavelengths, uav_spectra_for_plot[i], 'o-', label='真实UAV光谱（标准化后）', linewidth=2, markersize=8, color='blue')
-            ax.plot(band_wavelengths, s2_spectra_for_plot[i], 's-', label='原始S2光谱（标准化后）', linewidth=2, markersize=8, alpha=0.7, color='orange')
-            ax.plot(band_wavelengths, l8_spectra_for_plot[i], '^-', label='原始L8光谱（标准化后）', linewidth=2, markersize=8, alpha=0.7, color='green')
-            ax.plot(band_wavelengths, s2_preds_normalized[i], '--', label='S2预测光谱（标准化后）', linewidth=2, alpha=0.8, color='purple')
-            ax.plot(band_wavelengths, l8_preds_normalized[i], '--', label='L8预测光谱（标准化后）', linewidth=2, alpha=0.8, color='gray')
+            # 处理NaN值：只绘制有效值
+            uav_vals = uav_spectra_for_plot[i]
+            s2_vals = s2_spectra_for_plot[i]
+            l8_vals = l8_spectra_for_plot[i]
+            s2_pred_vals = s2_preds_normalized[i]
+            l8_pred_vals = l8_preds_normalized[i]
+            
+            # 创建有效值掩码
+            uav_valid = ~np.isnan(uav_vals)
+            s2_valid = ~np.isnan(s2_vals)
+            l8_valid = ~np.isnan(l8_vals)
+            s2_pred_valid = ~np.isnan(s2_pred_vals)
+            l8_pred_valid = ~np.isnan(l8_pred_vals)
+            
+            if np.any(uav_valid):
+                ax.plot(np.array(band_wavelengths)[uav_valid], uav_vals[uav_valid], 'o-', label='真实UAV光谱（标准化后）', linewidth=2, markersize=8, color='blue')
+            if np.any(s2_valid):
+                ax.plot(np.array(band_wavelengths)[s2_valid], s2_vals[s2_valid], 's-', label='原始S2光谱（标准化后）', linewidth=2, markersize=8, alpha=0.7, color='orange')
+            if np.any(l8_valid):
+                ax.plot(np.array(band_wavelengths)[l8_valid], l8_vals[l8_valid], '^-', label='原始L8光谱（标准化后）', linewidth=2, markersize=8, alpha=0.7, color='green')
+            if np.any(s2_pred_valid):
+                ax.plot(np.array(band_wavelengths)[s2_pred_valid], s2_pred_vals[s2_pred_valid], '--', label='S2预测光谱（标准化后）', linewidth=2, alpha=0.8, color='purple')
+            if np.any(l8_pred_valid):
+                ax.plot(np.array(band_wavelengths)[l8_pred_valid], l8_pred_vals[l8_pred_valid], '--', label='L8预测光谱（标准化后）', linewidth=2, alpha=0.8, color='gray')
             
             ax.set_xlabel('波长 (nm)', fontsize=10)
             ax.set_ylabel('标准化后的反射率', fontsize=10)
             ax.set_title(f'点 {i+1}', fontsize=10)
             ax.legend(fontsize=8)
             ax.grid(True, alpha=0.3)
+        
+        # 隐藏多余的空白子图
+        if n_points < len(axes):
+            for i in range(n_points, len(axes)):
+                axes[i].set_visible(False)
         
         plt.tight_layout()
         output_path = output_dir / 'spectral_curves_all.png'
